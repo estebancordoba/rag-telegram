@@ -59,6 +59,73 @@ The system operates in two main steps:
 3. OpenAI API key
 4. Telegram Bot token
 
+## Database Setup
+
+### Installing pgvector
+
+Before using this project, you need to install the pgvector extension in your PostgreSQL database. The official documentation and installation instructions can be found at [pgvector's GitHub repository](https://github.com/pgvector/pgvector).
+
+Quick installation steps for different environments:
+
+- **Linux/Mac**:
+  ```bash
+  cd /tmp
+  git clone --branch v0.8.0 https://github.com/pgvector/pgvector.git
+  cd pgvector
+  make
+  make install # may need sudo
+  ```
+
+- **Docker**: `docker pull pgvector/pgvector:pg17`
+
+- **APT (Debian/Ubuntu)**: `sudo apt install postgresql-17-pgvector`
+
+- **Homebrew**: `brew install pgvector`
+
+### Creating Database Schema
+
+Once pgvector is installed, run the following SQL commands to set up your database:
+
+```sql
+-- 1. Enable the pgvector extension (if not already enabled)
+CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions;
+
+-- 2. Create table to store documents and embeddings
+CREATE TABLE public.documentos_rag (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    content text,         -- Text fragment
+    metadata jsonb,       -- Additional metadata (optional)
+    embedding vector(1536) -- Vector dimension depends on OpenAI model (text-embedding-3-small uses 1536)
+);
+
+-- 3. Create function to search for similar documents (used by LangChain)
+-- This version is compatible with langchain_community.vectorstores
+CREATE OR REPLACE FUNCTION public.match_documents_lc (
+  query_embedding vector(1536),
+  match_count      INT      DEFAULT NULL,
+  filter           JSONB    DEFAULT '{}'
+)
+RETURNS TABLE (
+  id         UUID,
+  content    TEXT,
+  similarity FLOAT
+)
+LANGUAGE SQL STABLE
+AS $$
+  -- Call the original function with parameters in the expected order
+  SELECT
+    docs.id,
+    docs.content,
+    1 - (docs.embedding <=> query_embedding) AS similarity
+  FROM documentos_rag AS docs
+  WHERE docs.metadata @> filter
+  ORDER BY docs.embedding <=> query_embedding
+  LIMIT match_count;
+$$;
+```
+
+**Note**: The table name in the SQL script should match the `TABLE_NAME` in your environment variables.
+
 ## Environment Variables
 
 Create a `.env` file with the following variables:
