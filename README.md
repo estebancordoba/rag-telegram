@@ -65,7 +65,7 @@ Create a `.env` file with the following variables:
 
 ```
 # OpenAI
-OPENAI_API_KEY=your_openai_api_key
+OPENAI_API_KEY=your_openai_api_key  # Used implicitly by LangChain classes
 
 # Telegram
 TELEGRAM_TOKEN=your_telegram_bot_token
@@ -83,6 +83,14 @@ CHUNK_SIZE=1000
 CHUNK_OVERLAP=100
 URL_REMOTE_TEXT=https://example.com/your_text_source.txt
 ```
+
+### Models Used
+
+This project uses the following OpenAI models:
+- **LLM**: GPT-4o (explicitly specified in code)
+- **Embeddings**: text-embedding-3-small (default model used by LangChain when not explicitly specified)
+
+These models are automatically accessed using the OPENAI_API_KEY environment variable, which is loaded by the application and used implicitly by LangChain's OpenAI integration classes.
 
 ## Usage
 

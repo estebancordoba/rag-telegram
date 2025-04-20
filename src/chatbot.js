@@ -32,6 +32,8 @@ logWithTimestamp(
   `📊 PostgreSQL pool connection configured (${process.env.PGHOST}:${process.env.PGPORT})`
 );
 
+// OPENAI_API_KEY is used implicitly by the OpenAIEmbeddings class
+// When no model is specified, it uses the default embedding model (text-embedding-3-small)
 const embeddings = new OpenAIEmbeddings(); // generates vectors
 logWithTimestamp("🧠 OpenAI embeddings model initialized");
 
@@ -55,6 +57,8 @@ const vectorStore = await PGVectorStore.initialize(
 ); // PGVectorStore docs :contentReference[oaicite:0]{index=0}
 logWithTimestamp("✅ PGVectorStore successfully initialized");
 
+// OPENAI_API_KEY is implicitly used here as well
+// We explicitly specify the model as "gpt-4o" for the LLM
 const llm = new ChatOpenAI({ temperature: 0, modelName: "gpt-4o" });
 logWithTimestamp("🤖 ChatOpenAI language model (GPT-4o) initialized");
 

@@ -51,7 +51,7 @@ async function embedAndStore(docs) {
 
     // Initialize / "make sure table exists" (once)
     const vectorStore = await PGVectorStore.initialize(
-      new OpenAIEmbeddings(), // embeddings function
+      new OpenAIEmbeddings(), // embeddings function - uses OPENAI_API_KEY implicitly and default model (text-embedding-3-small)
       {
         pool,
         tableName, // use your table
