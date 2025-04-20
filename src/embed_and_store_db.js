@@ -8,7 +8,7 @@ import { OpenAIEmbeddings } from "@langchain/openai";
 import { PGVectorStore } from "@langchain/community/vectorstores/pgvector";
 
 /* ------------------------------------------------------------------ */
-/* 1) Descargar el texto remoto (equiv. nodo HTTP Request en n8n)     */
+/* 1) Download remote text                                            */
 /* ------------------------------------------------------------------ */
 async function fetchText(url) {
   const { data } = await axios.get(url);
@@ -16,25 +16,25 @@ async function fetchText(url) {
 }
 
 /* ------------------------------------------------------------------ */
-/* 2) Dividir en fragmentos con RecursiveCharacterTextSplitter         */
+/* 2) Split into fragments with RecursiveCharacterTextSplitter        */
 /* ------------------------------------------------------------------ */
 async function splitIntoDocuments(rawText) {
   const splitter = new RecursiveCharacterTextSplitter({
     chunkSize: Number(process.env.CHUNK_SIZE) || 1000,
     chunkOverlap: Number(process.env.CHUNK_OVERLAP) || 100,
   });
-  return splitter.createDocuments([rawText]); // devuelve Array< Document >
+  return splitter.createDocuments([rawText]); // returns Array< Document >
 }
 
 /* ------------------------------------------------------------------ */
-/* 3) Generar embeddings y almacenar en pgvector                       */
+/* 3) Generate embeddings and store in pgvector                       */
 /* ------------------------------------------------------------------ */
 async function embedAndStore(docs) {
-  // Instancia del pool global para controlarlo adecuadamente
+  // Global pool instance to control it properly
   let pool = null;
 
   try {
-    // Crear el pool de conexiones
+    // Create connection pool
     pool = new pg.Pool({
       host: process.env.PGHOST,
       port: process.env.PGPORT,
@@ -43,104 +43,103 @@ async function embedAndStore(docs) {
       database: process.env.PGDATABASE,
     });
 
-    // Comprobar que la conexión funciona
+    // Check that connection works
     await pool.query("SELECT 1");
-    console.log("✓ Conexión a PostgreSQL establecida correctamente");
+    console.log("✓ PostgreSQL connection established successfully");
 
     const tableName = process.env.TABLE_NAME || "documentos_rag";
 
-    // Inicializa / "se asegura de que la tabla exista" (una vez)
+    // Initialize / "make sure table exists" (once)
     const vectorStore = await PGVectorStore.initialize(
-      new OpenAIEmbeddings(), // función de embeddings
+      new OpenAIEmbeddings(), // embeddings function
       {
         pool,
-        tableName, // usa tu tabla
-        // Especificamos explícitamente los nombres de las columnas
+        tableName, // use your table
+        // Explicitly specify column names
         columns: {
           idColumnName: "id",
           vectorColumnName: "embedding",
-          contentColumnName: "content", // aseguramos que sea 'content' y no 'text'
+          contentColumnName: "content", // ensure it's 'content' not 'text'
           metadataColumnName: "metadata",
         },
-        // las columnas default son id, content, metadata y vector
-        // cámbialas aquí si tu tabla difiere
+        // default columns are id, content, metadata and vector
+        // change them here if your table differs
       }
     );
 
-    // Genera embeddings en lote e inserta
+    // Generate batch embeddings and insert
     await vectorStore.addDocuments(
       docs.map((d) => ({
-        // 👉 pageContent será la columna "content"
+        // 👉 pageContent will be the "content" column
         pageContent: d.pageContent,
-        // 👉 metadata puede almacenar la URL fuente, índice, etc.
+        // 👉 metadata can store source URL, index, etc.
         metadata: { source: "truora-blog", uuid: uuid() },
       }))
     );
 
-    console.log(`✔ Almacenados ${docs.length} fragmentos en "${tableName}".`);
+    console.log(`✔ Stored ${docs.length} fragments in "${tableName}".`);
     return true;
   } catch (error) {
-    console.error("Error al almacenar documentos:", error);
+    console.error("Error storing documents:", error);
     throw error;
   } finally {
-    // Asegurarse de que pool.end() siempre se ejecute si el pool existe
+    // Make sure pool.end() always executes if pool exists
     if (pool) {
       try {
         await pool.end();
-        console.log("✓ Conexión a la base de datos cerrada correctamente.");
+        console.log("✓ Database connection closed successfully.");
       } catch (err) {
-        console.error("Error al cerrar el pool de conexiones:", err);
+        console.error("Error closing connection pool:", err);
       }
     }
   }
 }
 
 /* ------------------------------------------------------------------ */
-/* 4) Lanzador ("main")                                                */
+/* 4) Launcher ("main")                                               */
 /* ------------------------------------------------------------------ */
 (async () => {
   const exitTimeout = setTimeout(() => {
     console.log(
-      "⚠️ Forzando cierre del proceso tras 30 segundos de inactividad"
+      "⚠️ Forcing process termination after 30 seconds of inactivity"
     );
     process.exit(0);
-  }, 30000); // 30 segundos de seguridad
+  }, 30000); // 30 seconds safety
 
   try {
-    const url =
-      "https://raw.githubusercontent.com/juanhenaoparra/examples/refs/heads/main/truora-blog.txt";
-    console.log("▶ Descargando texto…");
+    const url = process.env.URL_REMOTE_TEXT;
+    console.log("▶ Downloading text...");
     const rawText = await fetchText(url);
 
-    console.log("🔪 Dividiendo en fragmentos…");
+    console.log("🔪 Splitting into chunks...");
     const docs = await splitIntoDocuments(rawText);
 
-    console.log("📥 Generando embeddings y guardando en Postgres…");
+    console.log("📥 Generating embeddings and saving to Postgres...");
     await embedAndStore(docs);
 
-    console.log("✅ Proceso completado exitosamente.");
+    console.log("✅ Process completed successfully.");
 
-    // Limpiar el timeout ya que el proceso terminó correctamente
+    // Clear timeout as process completed correctly
     clearTimeout(exitTimeout);
 
-    // Dar tiempo para que todos los logs se escriban y forzar salida
+    // Give time for all logs to be written and force exit
     setTimeout(() => {
       process.exit(0);
     }, 500);
   } catch (error) {
-    console.error("Error en el proceso principal:", error);
+    console.error("Error in main process:", error);
     clearTimeout(exitTimeout);
     process.exit(1);
   }
 })();
 
-// Manejo de señales para cerrar el proceso limpiamente
+// Handle signals to cleanly close the process
 process.on("SIGINT", () => {
-  console.log("Proceso interrumpido manualmente. Finalizando...");
+  console.log("Process manually interrupted. Finishing...");
   process.exit(0);
 });
 
 process.on("unhandledRejection", (reason, promise) => {
-  console.error("Promesa rechazada no manejada:", reason);
+  console.error("Unhandled promise rejection:", reason);
   process.exit(1);
 });

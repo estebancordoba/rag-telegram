@@ -5,7 +5,7 @@ import pg from "pg";
 import { OpenAIEmbeddings, ChatOpenAI } from "@langchain/openai";
 import { PGVectorStore } from "@langchain/community/vectorstores/pgvector";
 
-// Función auxiliar para logs más detallados
+// Helper function for detailed logs
 function logWithTimestamp(message, data = null) {
   const timestamp = new Date().toISOString().slice(11, 19); // HH:MM:SS
   const prefix = `[${timestamp}]`;
@@ -17,8 +17,8 @@ function logWithTimestamp(message, data = null) {
   }
 }
 
-/* ---------- 1) Conexiones globales ---------- */
-logWithTimestamp("🔌 Iniciando conexiones a servicios externos...");
+/* ---------- 1) Global connections ---------- */
+logWithTimestamp("🔌 Initializing connections to external services...");
 
 const pool = new pg.Pool({
   host: process.env.PGHOST,
@@ -29,22 +29,22 @@ const pool = new pg.Pool({
 });
 
 logWithTimestamp(
-  `📊 Conexión al pool de PostgreSQL configurada (${process.env.PGHOST}:${process.env.PGPORT})`
+  `📊 PostgreSQL pool connection configured (${process.env.PGHOST}:${process.env.PGPORT})`
 );
 
-const embeddings = new OpenAIEmbeddings(); // genera vectores
-logWithTimestamp("🧠 Modelo de embeddings de OpenAI inicializado");
+const embeddings = new OpenAIEmbeddings(); // generates vectors
+logWithTimestamp("🧠 OpenAI embeddings model initialized");
 
 logWithTimestamp(
-  `🗄️ Inicializando PGVectorStore con tabla: ${process.env.TABLE_NAME}`
+  `🗄️ Initializing PGVectorStore with table: ${process.env.TABLE_NAME}`
 );
 const vectorStore = await PGVectorStore.initialize(
-  // crea/usa tabla
+  // creates/uses table
   embeddings,
   {
     pool,
     tableName: process.env.TABLE_NAME,
-    // Especificamos explícitamente los nombres de las columnas para evitar problemas
+    // Explicitly specify column names to avoid problems
     columns: {
       idColumnName: "id",
       vectorColumnName: "embedding",
@@ -52,133 +52,136 @@ const vectorStore = await PGVectorStore.initialize(
       metadataColumnName: "metadata",
     },
   }
-); // docs PGVectorStore :contentReference[oaicite:0]{index=0}
-logWithTimestamp("✅ PGVectorStore inicializado correctamente");
+); // PGVectorStore docs :contentReference[oaicite:0]{index=0}
+logWithTimestamp("✅ PGVectorStore successfully initialized");
 
 const llm = new ChatOpenAI({ temperature: 0, modelName: "gpt-4o" });
-logWithTimestamp("🤖 Modelo de lenguaje ChatOpenAI (GPT-4o) inicializado");
+logWithTimestamp("🤖 ChatOpenAI language model (GPT-4o) initialized");
 
-/* ---------- 2) Arranque del bot de Telegram ---------- */
-const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { polling: true }); // uso básico de node‑telegram‑bot‑api :contentReference[oaicite:1]{index=1}
-logWithTimestamp("🚀 Bot de Telegram iniciado y escuchando mensajes");
+/* ---------- 2) Telegram bot startup ---------- */
+const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { polling: true }); // basic usage of node‑telegram‑bot‑api :contentReference[oaicite:1]{index=1}
+logWithTimestamp("🚀 Telegram bot started and listening for messages");
 
-/* ---------- 3) Handler de mensajes ---------- */
+/* ---------- 3) Message handler ---------- */
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
-  const userName = msg.from?.first_name || "Usuario";
+  const userName = msg.from?.first_name || "User";
   const text = msg.text?.trim();
 
   logWithTimestamp(
-    `📨 Mensaje recibido de ${userName} (ID: ${chatId}): "${text}"`
+    `📨 Message received from ${userName} (ID: ${chatId}): "${text}"`
   );
 
   if (!text || text.startsWith("/")) {
     if (text === "/start") {
-      logWithTimestamp(`🤝 Comando /start recibido de ${userName}`);
+      logWithTimestamp(`🤝 /start command received from ${userName}`);
       await bot.sendMessage(
         chatId,
-        "¡Hola! Estoy listo para responder tus preguntas sobre el contenido del blog. ¿Qué te gustaría saber?"
+        "Hello! I'm ready to answer your questions about the blog content. What would you like to know?"
       );
     } else if (text) {
-      logWithTimestamp(`⚠️ Comando no procesado: ${text}`);
+      logWithTimestamp(`⚠️ Unprocessed command: ${text}`);
     }
-    return; // ignora otros comandos
+    return; // ignore other commands
   }
 
-  // Enviar mensaje de espera
-  await bot.sendMessage(chatId, "Procesando tu pregunta, dame un momento...");
-  logWithTimestamp("🔄 Enviado mensaje de espera al usuario");
+  // Send waiting message
+  await bot.sendMessage(
+    chatId,
+    "Processing your question, give me a moment..."
+  );
+  logWithTimestamp("🔄 Waiting message sent to user");
 
   try {
-    /* 3a) Recupera los 4 fragmentos más relevantes */
-    logWithTimestamp("🔍 Buscando fragmentos relevantes para la consulta...");
+    /* 3a) Retrieve the 4 most relevant fragments */
+    logWithTimestamp("🔍 Searching for relevant fragments for the query...");
     const startSearch = Date.now();
     const docs = await vectorStore.similaritySearch(text, 4);
     const searchTime = ((Date.now() - startSearch) / 1000).toFixed(2);
 
     logWithTimestamp(
-      `📚 Recuperados ${docs.length} fragmentos relevantes en ${searchTime} segundos`
+      `📚 Retrieved ${docs.length} relevant fragments in ${searchTime} seconds`
     );
 
     if (docs.length === 0) {
-      logWithTimestamp("⚠️ No se encontraron fragmentos relevantes");
+      logWithTimestamp("⚠️ No relevant fragments found");
       await bot.sendMessage(
         chatId,
-        "No encontré información relevante para tu pregunta. ¿Puedes reformularla?"
+        "I couldn't find relevant information for your question. Can you rephrase it?"
       );
       return;
     }
 
-    /* 3b) Construye el contexto para el prompt */
+    /* 3b) Build context for the prompt */
     logWithTimestamp(
-      "📝 Construyendo contexto para el prompt con los fragmentos recuperados"
+      "📝 Building context for the prompt with retrieved fragments"
     );
     const context = docs
       .map((d, i) => `(${i + 1}) ${d.pageContent}`)
       .join("\n");
 
-    // Log de los fragmentos recuperados (versión resumida)
+    // Log of retrieved fragments (summarized version)
     docs.forEach((doc, i) => {
       const shortContent =
         doc.pageContent.substring(0, 150) +
         (doc.pageContent.length > 150 ? "..." : "");
-      logWithTimestamp(`📄 Fragmento #${i + 1}:`, shortContent);
+      logWithTimestamp(`📄 Fragment #${i + 1}:`, shortContent);
     });
 
-    /* 3c) Prompt + llamada al modelo */
-    const prompt = `Responde la siguiente pregunta usando SÓLO la información proporcionada.
+    /* 3c) Prompt + model call */
+    const prompt = `Answer the following question using ONLY the information provided.
 
-${context}
+                    ${context}
 
-Pregunta: ${text}
-Respuesta en español:`;
+                    Question: ${text}
+                    Answer:`;
 
-    logWithTimestamp("🧠 Enviando consulta al modelo LLM...");
+    logWithTimestamp("🧠 Sending query to LLM model...");
     const startLLM = Date.now();
     const response = await llm.invoke(prompt);
     const llmTime = ((Date.now() - startLLM) / 1000).toFixed(2);
 
-    // Extraer el contenido del mensaje del modelo
+    // Extract content from model response
     const answer = response.content;
-    logWithTimestamp(`✅ Respuesta recibida del modelo en ${llmTime} segundos`);
-    logWithTimestamp("📤 Respuesta del modelo:", answer);
+    logWithTimestamp(`✅ Response received from model in ${llmTime} seconds`);
+    logWithTimestamp("📤 Model response:", answer);
 
-    // Verificar que la respuesta no esté vacía
+    // Verify that the response is not empty
     if (!answer || typeof answer !== "string" || answer.trim() === "") {
-      throw new Error("La respuesta del modelo está vacía");
+      throw new Error("The model response is empty");
     }
 
-    /* 3d) Devuelve al usuario */
+    /* 3d) Return to user */
     await bot.sendMessage(chatId, answer);
-    logWithTimestamp(`📬 Respuesta enviada a ${userName}`);
+    logWithTimestamp(`📬 Response sent to ${userName}`);
 
-    // Métricas de tiempo total
+    // Total time metrics
     const totalTime = ((Date.now() - startSearch) / 1000).toFixed(2);
     logWithTimestamp(
-      `⏱️ Tiempo total de procesamiento: ${totalTime} segundos (Búsqueda: ${searchTime}s, LLM: ${llmTime}s)`
+      `⏱️ Total processing time: ${totalTime} seconds (Search: ${searchTime}s, LLM: ${llmTime}s)`
     );
   } catch (err) {
-    console.error("❌ Error en QA:", err);
-    logWithTimestamp("🚨 Error al procesar la consulta", err);
-    // Asegurar que siempre enviamos un mensaje válido
+    console.error("❌ Error in QA:", err);
+    logWithTimestamp("🚨 Error processing the query", err);
+    // Ensure we always send a valid message
     await bot.sendMessage(
       chatId,
-      "Lo siento, ocurrió un error al procesar tu pregunta. Por favor, inténtalo de nuevo más tarde."
+      "Sorry, an error occurred while processing your question. Please try again later."
     );
-    logWithTimestamp("📤 Mensaje de error enviado al usuario");
+    logWithTimestamp("📤 Error message sent to user");
   }
 });
 
-/* ---------- 4) Cierre limpio si detienes el proceso ---------- */
+/* ---------- 4) Clean shutdown when process is stopped ---------- */
 process.on("SIGINT", async () => {
-  logWithTimestamp("⌨️ Señal de interrupción recibida. Cerrando conexiones...");
+  logWithTimestamp("⌨️ Interrupt signal received. Closing connections...");
   await pool.end();
-  logWithTimestamp("🛑 Conexiones cerradas. Terminando el proceso.");
+  logWithTimestamp("🛑 Connections closed. Terminating the process.");
   process.exit(0);
 });
 
-// Capturar rechazos de promesas no manejados
+// Capture unhandled promise rejections
 process.on("unhandledRejection", (reason, promise) => {
-  logWithTimestamp("❌ Promesa rechazada no manejada:", reason);
-  // No terminamos el proceso para que el bot siga funcionando
+  logWithTimestamp("❌ Unhandled promise rejection:", reason);
+  // We don't terminate the process so the bot keeps running
 });
