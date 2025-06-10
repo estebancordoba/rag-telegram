@@ -22,7 +22,7 @@ This project showcases how to build a question-answering system that leverages v
 ├── src/
 │   ├── embed_and_store_db.js  - Script to process and store document embeddings
 │   ├── chatbot.js             - Telegram bot implementation with RAG functionality
-├── .env                       - Environment variables configuration
+├── .env.sample                - Sample environment file (copy to .env)
 └── README.md                  - Project documentation
 ```
 
@@ -128,7 +128,7 @@ $$;
 
 ## Environment Variables
 
-Create a `.env` file with the following variables:
+Copy `.env.sample` to `.env` and set the following variables:
 
 ```
 # OpenAI
